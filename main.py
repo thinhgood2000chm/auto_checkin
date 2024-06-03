@@ -117,24 +117,18 @@ def convert_base64_to_image(base64_string: str):
         image = image.convert('RGB')
     return image
 
-def crop_face(face_data: dict, index_image: int, raw_image, crop_face_in_card=False):
+def crop_face(face_data: dict, raw_image):
     try:
         # 0: xmin, 1: ymin, 2: xmax, 3: ymax
-        facial_area = face_data['facial_area']
         image = raw_image
         image_in_type_array = np.array(image)
-        if crop_face_in_card:
-            face = image_in_type_array[int(int(float(facial_area["1"]))*0.8): int(int(float(facial_area["3"]))*1.1), int(int(float(facial_area["0"]))*0.6): int(int(float(facial_area["2"]))*1.2)]
-        else:
-            right_eye = [float(face_data['right_eye']["x"]), float(face_data['right_eye']["y"])]
-            left_eye = [float(face_data['left_eye']["x"]), float(face_data['left_eye']["y"])]
-            nose = [float(face_data['nose']["x"]), float(face_data['nose']["y"])]
-            mouth_right = [float(face_data['mouth_right']["x"]), float(face_data['mouth_right']["y"])]
-            mouth_left = [float(face_data['mouth_left']["x"]), float(face_data['mouth_left']["y"])]
-            kps = np.array([right_eye, left_eye, nose, mouth_right, mouth_left])
-            face = norm_crop(image_in_type_array, landmark=kps, image_size=112)
-
-            # face = image_in_type_array[int(float(facial_area["1"])): int(float(facial_area["3"])), int(float(facial_area["0"])): int(float(facial_area["2"]))]
+        right_eye = [float(face_data['right_eye']["x"]), float(face_data['right_eye']["y"])]
+        left_eye = [float(face_data['left_eye']["x"]), float(face_data['left_eye']["y"])]
+        nose = [float(face_data['nose']["x"]), float(face_data['nose']["y"])]
+        mouth_right = [float(face_data['mouth_right']["x"]), float(face_data['mouth_right']["y"])]
+        mouth_left = [float(face_data['mouth_left']["x"]), float(face_data['mouth_left']["y"])]
+        kps = np.array([right_eye, left_eye, nose, mouth_right, mouth_left])
+        face = norm_crop(image_in_type_array, landmark=kps, image_size=112)
         return face
     except (Exception,):
         return None
@@ -201,14 +195,14 @@ def verify_image(source_embedding, target_embedding, threshold=0.32):
 
 def checkin(data_face_detect, frame):
     list_face_after_crop = []
-    for index, faces_data in enumerate(data_face_detect):
+    for faces_data in data_face_detect:
         faces_data = sorted(
             faces_data, key=lambda x: x["score"], reverse=True
         )
         # hiện tại chỉ cho phép 1 khuôn mặt trong 1 ảnh => ảnh detect ra 2 khuôn măt sẽ lấy khuôn mặt có score cao nhất
-        # socre thấp có thể là detect sai
+        # score thấp có thể là detect sai
         face_data = faces_data[0]
-        face_after_crop = crop_face(face_data, index, frame)
+        face_after_crop = crop_face(face_data, frame)
         if not face_after_crop.any():
             print("error dont have face")
         else:
@@ -228,10 +222,9 @@ def checkin(data_face_detect, frame):
             )
 
             all_data_embedding = list(all_data_embedding)
-            list_all_image = []
             for index, data_image in enumerate(data_embedding_for_verify):
                 data_image = data_image[0]
-                list_image_each_index = []
+                list_user_info = []
                 for data_embedding in all_data_embedding:
                     for data_image_face in data_embedding["embedding"]:
                         data_image_in_db = data_image_face[0]
@@ -245,30 +238,30 @@ def checkin(data_face_detect, frame):
                                 corp_code=data_embedding["corp_code"],
                                 user_code=data_embedding["user_code"],
                             )
-                            is_checkin_success = checkin_user(data_embedding["user_code"])
                             if user_info:
                                 user_info["dob"] = str(user_info["dob"])
                                 user_info["distance"] = distance
-                                list_image_each_index.append(user_info)
-
-                            if is_checkin_success:
-                                cv2.putText(frame, "cham cong thanh cong", (7, 150), cv2.FONT_HERSHEY_SIMPLEX, 1, (100, 255, 0), 1,
-                                            cv2.LINE_AA)
-                                cv2.imshow(f"{data_embedding['user_code']}", frame)
-                                cv2.waitKey(3000)
-                                print(f"cham cong thanh cong cho user {data_embedding['user_code']}")
+                                list_user_info.append(user_info)
                             break
-                list_image_each_index = sorted(
-                    list_image_each_index,
+                list_user_info = sorted(
+                    list_user_info,
                     key=lambda x: x["distance"],
                     reverse=True,
                 )
-                data_classify = {
-                        "users": list_image_each_index
-                        if list_image_each_index
-                        else None,
-                    }
-                print(data_classify)
+                is_checkin_success = checkin_user(list_user_info[0]["user_code"])
+                if is_checkin_success:
+                    cv2.putText(frame, "cham cong thanh cong", (7, 210), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 255, 0),
+                                1,
+                                cv2.LINE_AA)
+
+                    frame = cv2.resize(frame, (400, 400))
+                    cv2.imshow(f"{list_user_info[0]['user_code']}", frame)
+                    cv2.waitKey(3000)
+                # data_classify = {
+                #         "users": list_user_info
+                #         if list_user_info
+                #         else None,
+                #     }
 
     return "success"
 
@@ -326,7 +319,7 @@ if __name__ == '__main__':
                     # t1 = threading.Thread(target=checkin, args=(list_response, frame))
                     p.start()
 
-                frame = cv2.rectangle(frame, (int(float(results[0]["facial_area"]['0'])), int(float(results[0]["facial_area"]['1']))) , (int(float(results[0]["facial_area"]['2'])),int(float(results[0]["facial_area"]['3']))), (255,0,0), 2)
+                frame = cv2.rectangle(frame, (int(float(results[0]["facial_area"]['0'])), int(float(results[0]["facial_area"]['1']))), (int(float(results[0]["facial_area"]['2'])),int(float(results[0]["facial_area"]['3']))), (255,0,0), 2)
             cv2.imshow('frame', frame)
             key=cv2.waitKey(1)
 
